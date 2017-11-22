@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+	<meta charset="utf-8" />
+	<title>Adventure Game</title>
+	<link href="https://fonts.googleapis.com/css?family=Press+Start+2P" rel="stylesheet">
+	<link href="styles/main.css" rel="stylesheet">
+	<script src="scripts/gamedata.js"></script>
+	<style>
+audio {
+	display: none;
+}
+</style>
+	</head>
+	<body>
+<div id="gridContainer"></div>
+<h1>Adventure<br>Game!</h1>
+<h2>Lives Remaining</h2>
+<h3 id="Win">YOU WIN</h3>
+<h3 id="Lose">GAME OVER</h3>
+<img alt="" id="lifeOne" src="images/heart-1.png" width="64" height="64"> 
+<img alt="" id="lifeOneEmpty" src="images/heart-2.png" width="64" height="64"> 
+<img alt="" id="lifeTwo" src="images/heart-1.png" width="64" height="64"> 
+<img alt="" id="lifeTwoEmpty" src="images/heart-2.png" width="64" height="64"> 
+<img alt="" id="lifeThree" src="images/heart-1.png" width="64" height="64"> 
+<img alt="" id="lifeThreeEmpty" src="images/heart-2.png" width="64" height="64"> 
+
+<!-- https://freesound.org/people/Dirtjm/sounds/262279/ -->
+<audio id="effectAudio" src="sounds/grunt.wav" controls></audio>
+<audio id="itemAudio" src="sounds/OOT_Fanfare_Item.wav" controls></audio>
+<audio id="victory" src="sounds/Final_Fantasy_VII-Victory_Fanfare.mp3" controls></audio>
+<audio id="gameOver" src="sounds/64-game-over.mp3" controls></audio>
+<script>
+"use strict";
+
+// I. VARIABLES
+const cellWidth = 32; 
+const cellSpacing = 0;
+const container = document.querySelector("#gridContainer");
+const cells = []; // the HTML elements - our "view"
+
+// faking an enumeration here
+const keyboard = Object.freeze({
+	SHIFT: 		16,
+	SPACE: 		32,
+	LEFT: 		37, 
+	UP: 		38, 
+	RIGHT: 		39, 
+	DOWN: 		40
+});
+
+// this is an enumeration for gameworld levels
+const worldTile = Object.freeze({
+	FLOOR: 		0,
+	WALL: 		1,
+	GRASS: 		2,
+	WATER: 		3,
+	GROUND: 	4
+});
+
+// the "grunt" sound that plays when the player attempts to move into a wall or water square
+let effectAudio = undefined;
+let itemAudio = undefined;
+let victory = undefined;
+let gameOver = undefined;
+	
+// level data is over in gamedata.js
+let currentLevelNumber = 1;
+let currentGameWorld = undefined;   // a 2D array - the grid:  walls, floors, water, etc...
+let currentGameObjects = undefined; // a 1D array - stuff that's on top of the grid and can move: monsters, treasure, keys, etc...
+
+// the player - uses ES6 object literal syntax
+const player = Object.seal({
+	x:-1,
+	y:-1,
+	life:1,
+	element: undefined,
+	moveRight(){this.x++;},
+	moveDown(){this.y++;},
+	moveLeft(){this.x--;},
+	moveUp(){this.y--;},
+});
+const monster1 = Object.seal({
+	x:10,
+	y:18,
+	element: undefined,
+	moveRight(){this.x++;},
+	moveDown(){this.y++;},
+	moveLeft(){this.x--;},
+	moveUp(){this.y--;},
+});
+const monster3 = Object.seal({
+	x:12,
+	y:18,
+	element: undefined,
+	moveRight(){this.x++;},
+	moveDown(){this.y++;},
+	moveLeft(){this.x--;},
+	moveUp(){this.y--;},
+});
+const treasure1 = Object.seal({
+	x:17,
+	y:5,
+	element: undefined,
+	grabbed: undefined,
+});
+const ring1 = Object.seal({
+	x:10,
+	y:16,
+	element: undefined,
+	grabbed: undefined,
+});
+const key1 = Object.seal({
+	x:28,
+	y:3,
+	element: undefined,
+	grabbed: undefined,
+});
+const chest1 = Object.seal({
+	x:24,
+	y:15,
+	element: undefined,
+	winable: undefined,
+});
+	
+
+// II. INIT code
+window.onload = ()=>{
+	currentGameWorld = gameworld["world" + currentLevelNumber];
+	let numCols = currentGameWorld[0].length;
+	let numRows = currentGameWorld.length;
+	createGridElements(numRows,numCols);
+	drawGrid(currentGameWorld);
+	loadLevel(currentLevelNumber);
+	drawGameObjects(currentGameObjects);
+	effectAudio = document.querySelector("#effectAudio");
+	effectAudio.volume = 0.2;
+	itemAudio = document.querySelector("#itemAudio");
+	itemAudio.volume = 0.2;
+	victory = document.querySelector("#victory");
+	victory.volume = 0.2;
+	gameOver = document.querySelector("#gameOver");
+	gameOver.volume = 0.2;
+	setupEvents();
+	console.log("Controls:");
+	console.log("	Arrows for Movement");
+	console.log("	'R' to reset");
+	console.log("Goals:");
+	console.log("	Get the Key");
+	console.log("	Touch the Chest");
+	console.log("	Don't get touched by monsters.");
+	console.log("Hint:");
+	console.log("	Collect the jewelery to gain health.");
+}
+
+
+// III. FUNCTIONS
+// the elements on the screen that won't change - our "view"
+function createGridElements(numRows,numCols){
+	const span = document.createElement('span');
+	span.className = 'cell';
+	for (let row=0;row<numRows;row++){
+	cells.push([]);
+		for (let col=0;col<numCols;col++){
+			let cell = span.cloneNode();
+			cell.style.left = `${col * (cellWidth+cellSpacing)}px`;
+			cell.style.top = `${row * (cellWidth+cellSpacing)}px`;
+			container.appendChild(cell);
+			cells[row][col] = cell;
+		}
+	}
+}
+
+// the elements on the screen that can move and change - also part of the "view"
+function loadLevel(levelNum = 1){
+	currentGameObjects = []; // clear out the old array
+	const node =  document.createElement("span");
+	node.className = "gameObject";
+
+	// now initialize our player
+	player.x = 1;
+	player.y = 1;
+	player.element = node.cloneNode(true);
+	player.element.classList.add("player");
+	container.appendChild(player.element);
+	
+	monster1.x = Math.floor(Math.random() * (28 - 16)) + 16;
+	monster1.y = Math.floor(Math.random() * 18) + 1;
+	monster1.element = node.cloneNode(true);
+	monster1.element.classList.add("monster1");
+	container.appendChild(monster1.element);
+	
+	monster3.x = Math.floor(Math.random() * (28 - 6) ) + 6;
+	monster3.y = Math.floor(Math.random() * (18 - 12) ) + 12;
+	monster3.element = node.cloneNode(true);
+	monster3.element.classList.add("monster3");
+	container.appendChild(monster3.element);
+	
+	treasure1.grabbed = false;
+	treasure1.element = node.cloneNode(true);
+	treasure1.element.classList.add("treasure1");
+	container.appendChild(treasure1.element);	
+	
+	ring1.grabbed = false;
+	ring1.element = node.cloneNode(true);
+	ring1.element.classList.add("ring1");
+	container.appendChild(ring1.element);	
+	
+	key1.grabbed = false;
+	key1.element = node.cloneNode(true);
+	key1.element.classList.add("key1");
+	container.appendChild(key1.element);	
+	
+	chest1.winable = false;
+	chest1.element = node.cloneNode(true);
+	chest1.element.classList.add("chest1");
+	container.appendChild(chest1.element);
+	
+	/* let's instantiate our game objects */
+	// pull the current level data
+	const levelObjects = allGameObjects["level" + levelNum];
+	
+	// loop through this level's objects ... 
+	for (let obj of levelObjects){
+		const clone = Object.assign({}, obj); 		// clone the object
+		clone.element = node.cloneNode(true); 		// clone the element
+		clone.element.classList.add(obj.className); // add the className so we see the right image
+		currentGameObjects.push(clone);				// add to currentGameObjects array  (so it gets moved onto the map)
+		container.appendChild(clone.element);		// add to DOM tree (so we can see it!)
+	}
+}
+//draws the grid
+function drawGrid(array){
+	const numCols = array[0].length;
+	const numRows = array.length;
+	for (let row=0;row<numRows;row++){
+		for (let col=0;col<numCols;col++){
+			const tile = array[row][col];
+			const element = cells[row][col];
+			
+			// ** can you figure our how to get rid of this switch? Maybe another enumeration, of the tile CSS classes? **
+			switch(tile) {
+    			case worldTile.FLOOR:
+        		element.classList.add("floor")
+        		break;
+        		
+        		case worldTile.WALL:
+        		element.classList.add("wall");
+        		break;
+        		
+        		case worldTile.GRASS:
+        		element.classList.add("grass");
+        		break;
+        		
+        		case worldTile.WATER:
+        		element.classList.add("water");
+        		break;
+        		
+        		case worldTile.GROUND:
+        		element.classList.add("ground");
+        		break;
+			}
+		}
+	}
+}
+
+//draws and updates the characters
+function drawGameObjects(array){
+	// player
+	player.element.style.left = `${player.x * (cellWidth + cellSpacing)}px`;
+	player.element.style.top = `${player.y * (cellWidth + cellSpacing)}px`;
+	
+	monster1.element.style.left = `${monster1.x * (cellWidth + cellSpacing)}px`;
+	monster1.element.style.top = `${monster1.y * (cellWidth + cellSpacing)}px`;	
+	
+	monster3.element.style.left = `${monster3.x * (cellWidth + cellSpacing)}px`;
+	monster3.element.style.top = `${monster3.y * (cellWidth + cellSpacing)}px`;
+	
+	treasure1.element.style.left = `${treasure1.x * (cellWidth + cellSpacing)}px`;
+	treasure1.element.style.top = `${treasure1.y * (cellWidth + cellSpacing)}px`;
+			
+	ring1.element.style.left = `${ring1.x * (cellWidth + cellSpacing)}px`;
+	ring1.element.style.top = `${ring1.y * (cellWidth + cellSpacing)}px`;
+		
+	key1.element.style.left = `${key1.x * (cellWidth + cellSpacing)}px`;
+	key1.element.style.top = `${key1.y * (cellWidth + cellSpacing)}px`;
+		
+	chest1.element.style.left = `${chest1.x * (cellWidth + cellSpacing)}px`;
+	chest1.element.style.top = `${chest1.y * (cellWidth + cellSpacing)}px`;
+	
+	
+	// game object
+	for (let gameObject of array){
+		gameObject.element.style.left = `${gameObject.x * (cellWidth + cellSpacing)}px`;
+		gameObject.element.style.top = `${gameObject.y * (cellWidth + cellSpacing)}px`;
+	}
+	
+}
+
+//moves the player via key imputs
+function movePlayer(e){
+	let nextX;
+	let nextY;
+	switch(e.keyCode){
+		case keyboard.RIGHT:
+		nextX = player.x + 1;
+		nextY = player.y;
+		if(checkIsLegalMove(nextX,nextY)) player.moveRight();
+		break;
+		
+		case keyboard.DOWN:
+		nextX = player.x;
+		nextY = player.y + 1;
+		if(checkIsLegalMove(nextX,nextY)) player.moveDown();
+		break;
+		
+		case keyboard.LEFT:
+		nextX = player.x - 1;
+		nextY = player.y;
+		if(checkIsLegalMove(nextX,nextY)) player.moveLeft();
+		break;
+		
+		case keyboard.UP:
+		nextX = player.x;
+		nextY = player.y - 1;
+		if(checkIsLegalMove(nextX,nextY)) player.moveUp();
+		break;
+	}
+	
+	function checkIsLegalMove(nextX,nextY){
+		let nextTile = currentGameWorld[nextY][nextX];
+		if (nextTile != worldTile.WALL && nextTile != worldTile.WATER){
+			return true;
+		}else{
+			effectAudio.play();
+			return false;
+		}
+	}
+}
+//Moves a monster with priority to x value
+function moveMonster1(e){   
+	let nextX;
+	let nextY;
+	let movement;
+	
+	if(player.x > monster1.x-5 && player.x < monster1.x+5 && player.y > monster1.y-5 && player.y < monster1.y+5 || movement == true){
+		movement = true;
+	}
+	
+	if(player.x < monster1.x && movement == true){
+		nextX = monster1.x - 1;
+		nextY = monster1.y;
+		if(checkIsLegalMove(nextX,nextY)) monster1.moveLeft();
+	}
+	
+	else if(player.x > monster1.x && movement == true){
+		nextX = monster1.x + 1;
+		nextY = monster1.y;
+		if(checkIsLegalMove(nextX,nextY)) monster1.moveRight();
+	}
+	
+	else if(player.y > monster1.y && movement == true){
+		nextX = monster1.x;
+		nextY = monster1.y + 1;
+		if(checkIsLegalMove(nextX,nextY)) monster1.moveDown();
+	}
+	
+	else if(player.y < monster1.y && movement == true){
+		nextX = monster1.x;
+		nextY = monster1.y - 1;
+		if(checkIsLegalMove(nextX,nextY)) monster1.moveUp();
+	}
+	
+	function checkIsLegalMove(nextX,nextY){
+		let nextTile = currentGameWorld[nextY][nextX];
+		if (nextTile != worldTile.WALL && nextTile != worldTile.GRASS && nextTile != worldTile.WATER){
+			return true;
+		}else{
+			return false;
+		}
+	}
+}
+ //Moves a monster with priority to y value
+function moveMonster3(e){
+	let nextX;
+	let nextY;
+	let movement = false;
+	
+	if(player.x > monster3.x-7 && player.x < monster3.x+7 && player.y > monster3.y-7 && player.y < monster3.y+7 || movement == true){
+		movement = true;
+	}
+	
+	if(player.y < monster3.y && movement == true){
+		nextX = monster3.x;
+		nextY = monster3.y - 1;
+		if(checkIsLegalMove(nextX,nextY)) monster3.moveUp();
+	}
+	else if(player.y > monster3.y && movement == true){
+		nextX = monster3.x;
+		nextY = monster3.y + 1;
+		if(checkIsLegalMove(nextX,nextY)) monster3.moveDown();
+	}
+	
+	else if(player.x < monster3.x && movement == true){
+		nextX = monster3.x - 1;
+		nextY = monster3.y;
+		if(checkIsLegalMove(nextX,nextY)) monster3.moveLeft();
+	}
+	else if(player.x > monster3.x && movement == true){
+		nextX = monster3.x + 1;
+		nextY = monster3.y;
+		if(checkIsLegalMove(nextX,nextY)) monster3.moveRight();
+	}
+
+	function checkIsLegalMove(nextX,nextY){
+		let nextTile = currentGameWorld[nextY][nextX];
+		if (nextTile != worldTile.WALL && nextTile != worldTile.GRASS && nextTile != worldTile.WATER){
+			return true;
+		}else{
+			return false;
+		}
+	}
+}
+
+// IV. EVENTS
+function setupEvents(){
+	window.onmouseup = (e) => {
+		e.preventDefault();
+		gridClicked(e);
+	};
+	
+	window.onkeydown = (e)=>{
+
+		// checking for other keys - ex. 'p' and 'P' for pausing
+		var char = String.fromCharCode(e.keyCode);
+		if (char == "r" || char == "R"){
+			location.reload();
+		}
+		
+		movePlayer(e);
+		moveMonster1(e);
+		moveMonster3(e);
+		checkCollision();
+		checkVictory();
+		drawGameObjects(currentGameObjects);
+	};
+}
+//Checks if player collects and item or gets hit by a monster
+function checkCollision(){
+	if(player.x == treasure1.x && player.y == treasure1.y && treasure1.grabbed == false){
+		player.life++;
+		itemAudio.play();
+		treasure1.element.style.visibility = 'hidden';
+		checkLife();
+		treasure1.grabbed = true;
+	}
+	if(player.x == ring1.x && player.y == ring1.y && ring1.grabbed == false){
+		player.life++;
+		itemAudio.play();
+		ring1.element.style.visibility = 'hidden';
+		checkLife();
+		ring1.grabbed = true;
+	}	
+	if(player.x == key1.x && player.y == key1.y && key1.grabbed == false){
+		itemAudio.play();
+		key1.element.style.visibility = 'hidden';
+		key1.grabbed = true;
+		chest1.winable = true;
+	}	
+	if(player.x == monster1.x && player.y == monster1.y){
+		player.life--;
+		effectAudio.play();
+		checkLife();
+		monster1.x = Math.floor(Math.random() * (28-16) + 16);
+		monster1.y = Math.floor(Math.random() * (18 - 1) + 1);
+	}	
+	if(player.x == monster3.x && player.y == monster3.y){
+		player.life--;
+		effectAudio.play();
+		checkLife();
+		monster3.x = Math.floor(Math.random() * (28-16) + 16);
+		monster3.y = Math.floor(Math.random() * (18 - 1) + 1);
+	}
+}
+//checks and updates life totals
+function checkLife(){
+	if(player.life == 1){
+		document.getElementById("lifeOneEmpty").style.visibility = 'hidden';
+		document.getElementById("lifeTwo").style.visibility = 'hidden';
+		document.getElementById("lifeTwoEmpty").style.visibility = 'visible';
+		document.getElementById("lifeThree").style.visibility = 'hidden';
+		document.getElementById("lifeThreeEmpty").style.visibility = 'visible';
+	}
+	else if(player.life == 2){
+		document.getElementById("lifeOneEmpty").style.visibility = 'hidden';
+		document.getElementById("lifeTwo").style.visibility = 'visible';
+		document.getElementById("lifeTwoEmpty").style.visibility = 'hidden';
+		document.getElementById("lifeThree").style.visibility = 'hidden';
+		document.getElementById("lifeThreeEmpty").style.visibility = 'visible';
+
+	}
+	else if(player.life == 3){
+		document.getElementById("lifeOneEmpty").style.visibility = 'hidden';
+		document.getElementById("lifeTwo").style.visibility = 'visible';
+		document.getElementById("lifeTwoEmpty").style.visibility = 'hidden';
+		document.getElementById("lifeThree").style.visibility = 'visible';
+		document.getElementById("lifeThreeEmpty").style.visibility = 'hidden';
+	}
+	else{
+		document.getElementById("lifeOne").style.visibility = 'hidden';
+		document.getElementById("lifeOneEmpty").style.visibility = 'visible';
+		gameOver.play();
+		document.getElementById("Lose").style.visibility = 'visible';
+	}
+}
+//checks if victory	
+function checkVictory(){
+	if(key1.grabbed == true && chest1.winable == true && player.x == chest1.x && player.y == chest1.y){
+		victory.play();
+		document.getElementById("Win").style.visibility = 'visible';
+	}
+}
+
+function gridClicked(e){
+	let rect = container.getBoundingClientRect();
+	let mouseX = e.clientX - rect.x;
+	let mouseY = e.clientY - rect.y;
+	let columnWidth = cellWidth+cellSpacing;
+	let col = Math.floor(mouseX/columnWidth);
+	let row = Math.floor(mouseY/columnWidth);
+	let selectedCell = cells[row][col];
+	selectedCell.classList.add('cellSelected');
+	console.log(`${col},${row}`);
+}
+
+</script>
+</body>
+</html>
